@@ -118,18 +118,25 @@ description: Guide for creating effective skills. Use when users want to create 
 ```
 问题: "这个 Skill 你想在哪里用？"
 选项:
+- "全局使用，放到 cc-switch 统一管理"
 - "只在当前这个项目用"
-- "所有项目都能用"
 ```
 
 ```
 问题: "你用的是什么工具？"
 选项:
-- "Claude Code (命令行工具)"
-- "其他 (Cursor/Trae 等)"
+- "Claude、Codex、OpenCode 都要同步"
+- "只同步到 Claude"
+- "只同步到 Codex"
+- "只同步到 OpenCode"
 ```
 
-根据回答确定最终文件存放位置。
+默认策略：
+- 新增 Skill 一律创建在 `/Users/hxc/.cc-switch/skills/<skill-name>/`
+- Claude 使用软链接：`/Users/hxc/.claude/skills/<skill-name>` → `/Users/hxc/.cc-switch/skills/<skill-name>`
+- Codex 使用软链接：`/Users/hxc/.codex/skills/<skill-name>` → `/Users/hxc/.cc-switch/skills/<skill-name>`
+- OpenCode 使用软链接：`/Users/hxc/.config/opencode/skills/<skill-name>` → `/Users/hxc/.cc-switch/skills/<skill-name>`
+- 只有用户明确要求“只在当前项目用”时，才把 Skill 放到项目内目录；即使如此，也要在蓝图里提醒这不会进入 cc-switch 的全局同步流程。
 
 ### 1.5 架构解耦评估 [你来分析]
 
@@ -175,11 +182,17 @@ description: Guide for creating effective skills. Use when users want to create 
 - **触发词**: [用户说什么话会触发此 Skill]
 
 ### 目录结构
-[根据作用域确定的绝对路径]
+主目录：
+/Users/hxc/.cc-switch/skills/[skill-name]/
 ├── SKILL.md
 ├── scripts/      [如需要]
 ├── references/   [如需要]
 └── assets/       [如需要]
+
+同步软链接：
+- /Users/hxc/.claude/skills/[skill-name] -> /Users/hxc/.cc-switch/skills/[skill-name]
+- /Users/hxc/.codex/skills/[skill-name] -> /Users/hxc/.cc-switch/skills/[skill-name]
+- /Users/hxc/.config/opencode/skills/[skill-name] -> /Users/hxc/.cc-switch/skills/[skill-name]
 
 ### 工作流逻辑
 1. [步骤1]
@@ -228,7 +241,42 @@ description: Guide for creating effective skills. Use when users want to create 
 运行初始化脚本：
 
 ```bash
-python scripts/init_skill.py <skill-name> --path <output-directory>
+python scripts/init_skill.py <skill-name> --path /Users/hxc/.cc-switch/skills
+```
+
+创建规则：
+- `<output-directory>` 默认固定为 `/Users/hxc/.cc-switch/skills`
+- 不要把新 Skill 直接创建到 `/Users/hxc/.claude/skills`、`/Users/hxc/.codex/skills` 或 `/Users/hxc/.config/opencode/skills`
+- 三个客户端目录只放软链接，不放 Skill 本体
+- 如果目标客户端目录不存在，先创建目录
+- 如果客户端目录里已有同名普通文件/目录，先改名为 `<skill-name>.bak-YYYYMMDDHHMMSS`，再创建软链接
+- 如果已有同名软链接且已指向 cc-switch 正式目录，保持不变
+- 如果已有同名软链接但指向其他位置，先改名备份，再创建新软链接
+
+同步到 Claude、Codex、OpenCode：
+
+```bash
+for target_root in /Users/hxc/.claude/skills /Users/hxc/.codex/skills /Users/hxc/.config/opencode/skills; do
+  mkdir -p "$target_root"
+  dest="$target_root/<skill-name>"
+  src="/Users/hxc/.cc-switch/skills/<skill-name>"
+  if [ -L "$dest" ] && [ "$(readlink "$dest")" = "$src" ]; then
+    continue
+  fi
+  if [ -e "$dest" ] || [ -L "$dest" ]; then
+    mv "$dest" "$dest.bak-$(date +%Y%m%d%H%M%S)"
+  fi
+  ln -s "$src" "$dest"
+done
+```
+
+同步完成后必须验证：
+
+```bash
+for target_root in /Users/hxc/.claude/skills /Users/hxc/.codex/skills /Users/hxc/.config/opencode/skills; do
+  link="$target_root/<skill-name>"
+  test -L "$link" && test -f "$(readlink "$link")/SKILL.md" && echo "OK $link"
+done
 ```
 
 ### 3.3 编写 SKILL.md
@@ -284,7 +332,7 @@ description: 清晰描述 Skill 功能和触发场景。包含：(1) 做什么 (
 - "需要你帮我创建"
 ```
 
-**Phase 3 完成标志**：所有文件创建完成
+**Phase 3 完成标志**：Skill 本体已创建在 `/Users/hxc/.cc-switch/skills/<skill-name>/`，且 Claude、Codex、OpenCode 三处软链接均已验证 OK。
 
 ---
 
@@ -371,4 +419,3 @@ Skill 测试就是设计一个能触发它的提问。使用 `AskUserQuestion` �
 - **多步骤流程设计**: 见 [references/workflows.md](references/workflows.md)
 - **输出格式模式**: 见 [references/output-patterns.md](references/output-patterns.md)
 - **交互设计指南**: 见 [references/interaction-guide.md](references/interaction-guide.md) - AskUserQuestion 最佳实践
-

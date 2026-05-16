@@ -3,16 +3,25 @@
 Skill Initializer - Creates a new skill from template
 
 Usage:
-    init_skill.py <skill-name> --path <path>
+    init_skill.py <skill-name> [--path <path>] [--sync]
 
 Examples:
-    init_skill.py my-new-skill --path skills/public
-    init_skill.py my-api-helper --path skills/private
+    init_skill.py my-new-skill
+    init_skill.py my-api-helper --sync
     init_skill.py custom-skill --path /custom/location
 """
 
 import sys
 from pathlib import Path
+from datetime import datetime
+
+
+DEFAULT_CC_SWITCH_SKILLS_DIR = Path("/Users/hxc/.cc-switch/skills")
+SYNC_TARGETS = [
+    Path("/Users/hxc/.claude/skills"),
+    Path("/Users/hxc/.codex/skills"),
+    Path("/Users/hxc/.config/opencode/skills"),
+]
 
 
 SKILL_TEMPLATE = """---
@@ -270,22 +279,68 @@ def init_skill(skill_name, path):
     return skill_dir
 
 
+def sync_skill_links(skill_dir):
+    """Create Claude, Codex, and OpenCode symlinks for a cc-switch skill."""
+    timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+    created = []
+
+    for target_root in SYNC_TARGETS:
+        target_root.mkdir(parents=True, exist_ok=True)
+        dest = target_root / skill_dir.name
+
+        if dest.is_symlink() and dest.resolve() == skill_dir.resolve():
+            created.append(dest)
+            print(f"✅ Symlink already OK: {dest}")
+            continue
+
+        if dest.exists() or dest.is_symlink():
+            backup = dest.with_name(f"{dest.name}.bak-{timestamp}")
+            dest.rename(backup)
+            print(f"📦 Backed up existing target: {backup}")
+
+        dest.symlink_to(skill_dir, target_is_directory=True)
+        created.append(dest)
+        print(f"✅ Created symlink: {dest} -> {skill_dir}")
+
+    for link in created:
+        target = link.resolve()
+        if not link.is_symlink() or not (target / "SKILL.md").is_file():
+            print(f"❌ Symlink validation failed: {link}")
+            return False
+
+    return True
+
+
 def main():
-    if len(sys.argv) < 4 or sys.argv[2] != '--path':
-        print("Usage: init_skill.py <skill-name> --path <path>")
+    if len(sys.argv) < 2:
+        print("Usage: init_skill.py <skill-name> [--path <path>] [--sync]")
         print("\nSkill name requirements:")
         print("  - Hyphen-case identifier (e.g., 'data-analyzer')")
         print("  - Lowercase letters, digits, and hyphens only")
         print("  - Max 40 characters")
         print("  - Must match directory name exactly")
         print("\nExamples:")
-        print("  init_skill.py my-new-skill --path skills/public")
-        print("  init_skill.py my-api-helper --path skills/private")
+        print("  init_skill.py my-new-skill")
+        print("  init_skill.py my-api-helper --sync")
         print("  init_skill.py custom-skill --path /custom/location")
         sys.exit(1)
 
     skill_name = sys.argv[1]
-    path = sys.argv[3]
+    path = DEFAULT_CC_SWITCH_SKILLS_DIR
+    sync = False
+
+    args = sys.argv[2:]
+    i = 0
+    while i < len(args):
+        if args[i] == '--path' and i + 1 < len(args):
+            path = Path(args[i + 1])
+            i += 2
+        elif args[i] == '--sync':
+            sync = True
+            i += 1
+        else:
+            print(f"❌ Unknown or incomplete argument: {args[i]}")
+            sys.exit(1)
 
     print(f"🚀 Initializing skill: {skill_name}")
     print(f"   Location: {path}")
@@ -294,6 +349,10 @@ def main():
     result = init_skill(skill_name, path)
 
     if result:
+        if sync:
+            print("\n🔗 Syncing symlinks to Claude, Codex, and OpenCode...")
+            if not sync_skill_links(result):
+                sys.exit(1)
         sys.exit(0)
     else:
         sys.exit(1)
