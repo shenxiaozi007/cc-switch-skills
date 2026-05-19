@@ -43,17 +43,23 @@ description: 当用户要求“新增接口”“改增删改查”“做列表�
 - 不绕过 Business 直接在 Controller 调 Dao 或 Model。
 - 不为了新接口重构无关旧接口。
 - Raw SQL 必须参数绑定，避免字符串拼接。
+- 不保留已经确认废弃的兼容 route、权限常量、RBAC 项、空 Business 方法、旧枚举或旧字段；用户明确要求保留的兼容入口除外。
+- 不在新增 Model 中重复引入 BaseModel 已包含的 trait，例如 `SoftDeletes`、`ModelTimeTraits`、`ModelMainNoTrait`。
+- 不用 `$model->refresh()` 解决普通更新后的取值问题；Eloquent `update()` 后当前实例已同步变更字段，只有确实需要重新加载关系或数据库触发结果时才刷新。
 
 ## 完成检查
 - 路由、中间件、权限点与同模块风格一致。
 - Controller 仅收参、调用 Business、`revert()` 返回。
 - Business 完成校验、流程编排、事务边界。
 - Dao 封装查询和持久化；涉及结构变更时已补 migration 或说明。
+- 提交前针对本次新增/修改模块扫描：`request->all(`、直接 `doQuery(`、`extends Model`、`function mainNo(`、重复 trait、废弃 route/权限/枚举、`refresh()`、空兼容方法、旧字段名。
+- 新增或修改文件至少跑 `php -l`；批量新增 Model/Dao/migration 时用 `find ... -name '*.php' -print0 | xargs -0 -n1 php -l`。
 
 ## Controller 约束
 - 仅收参、调用 Business、`revert()` 返回。
 - 推荐构造器注入：`__construct(protected Request $request, protected XxxBusiness $business)`。
 - 不在 Controller 写复杂业务分支。
+- Controller 传入 Business 的数组参数必须用 `$this->request->only([...])` 白名单；单字段接口可用 `$this->validate()` 后只传字段值。
 - 管理端写操作通常透传 `management_auth_info()`。
 - 管理端路由通常配 `auth:jwt-management` + `WebRoute::*` 权限点，保持与 `routes/management/proxy/**` 同模块文件一致。
 - 写接口是否加 `api_mutex` 优先参考同模块已有写接口；新增高风险写操作要在 route 清单里标注建议。
@@ -64,13 +70,29 @@ description: 当用户要求“新增接口”“改增删改查”“做列表�
 - 枚举型参数优先使用 `Rule::in(XXX::all())`。
 - 复杂入参场景建议补 `customAttributes` 优化报错提示。
 - 跨表写入必须明确事务边界（`DB::transaction` 或 `app('db')->transaction`）。
+- 事务范围要尽量小：参数校验、读库查询、存在性校验、日期/状态前置校验、待写入数组组装，默认放事务外；事务内只放必须一起提交/回滚的写操作、日志、快照、同步更新。
+- 事务内避免为了刷新统计再读库；能用事务外已读取的数据计算的字段，先组装 `$updateData`，事务内直接 `update()` 并必要时 `$model->fill($updateData)`。
+- Business 不拼装底层组合查询参数。列表筛选中从用户字段转换成 `xxx_params`、关联筛选参数等逻辑应放在对应 Dao 的 `beforeBuildFiled()`。
+- 写操作要校验业务前置状态，例如已解散/禁用/已完成的实体不可继续编辑、加人、移除或流转。
 - 外部 API 调用与事件触发只保留在业务编排层。
 
 ## Dao 约束
 - 封装查询、分页、落库、局部更新。
 - 复用项目基础 Dao 能力（如 `getList/getPageList/findBy...`）。
 - 查询条件优先复用 Model 的 `scopeXxxQuery`、`scopeXxxLikeQuery`、时间范围 scope；只为需求确认的筛选字段补 scope。
+- 常规列表优先让 Business 组 `$params` 后调用 `getList/getPageList`；不要为简单列表额外写自定义 Dao 方法。
+- Dao 中确定参数的查询方法不要走通用 `$params + doQuery()`，应使用 `newBuilder()->select($this->getSelectColumns($columns))->with($relations)->XxxQuery(...)->first/get()`。
+- 确定参数的方法签名要直接表达参数含义，例如 `array $employeeNos, string $realNameLike = '', array $columns = []`，不要用泛化 `$params` 兜底。
+- `beforeBuildFiled(Builder $query, array $params): array` 用于整理组合筛选参数，例如把 `team_member_name` 转成 `team_bind_user_params`，把员工姓名/工号/是否在职转成 `employee_params`。
 - 禁止 SQL 字符串拼接；Raw 语句必须参数绑定。
+
+## Model 约束
+- 新增业务 Model 优先继承 `App\Kernel\Base\BaseModel`，并用 `protected string $mainNoColumn = 'xxx_no';` 定义唯一编号，不再覆写 `mainNo()`。
+- 继承 `BaseModel` 后不要重复 `use SoftDeletes, ModelTimeTraits, ModelMainNoTrait`。
+- 不为了普通日志时间覆盖 `setUpdatedAt()`；如果业务字段如 `action_at` 需要记录操作时间，优先在 Business 写日志数据时显式赋值。
+- 查询条件放到 Model scope：精确筛选用 `scopeXxxQuery`，模糊筛选用 `scopeXxxLikeQuery`，排除类可用 `scopeNotInXxxQuery`，排序字段必须补 `scopeSortByXxxQuery`。
+- 关联筛选优先用 `scopeXxxParamsQuery(Builder $builder, array $params)` + `$this->loadSubModelQuery('relationName', $builder, $params)`，避免在 Model 中手写多层 `whereHas` 闭包。
+- 本表多字段 OR 查询可以保留专门 scope，例如 `scopeNameOrShortNameLikeQuery`；跨关联组合筛选不要放在 Business 中拼闭包。
 
 ## 高风险点清单
 - 状态流转要校验前置状态，避免越级更新。

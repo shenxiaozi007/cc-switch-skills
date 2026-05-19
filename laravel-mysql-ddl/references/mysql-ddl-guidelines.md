@@ -8,16 +8,21 @@ CREATE TABLE `{table_name}` (
   `{short_table}_no` varchar(64) NOT NULL DEFAULT '' COMMENT '{业务}编号',
 
   -- 业务字段
+  `status` varchar(32) NOT NULL DEFAULT '' COMMENT '状态',
+  `business_at` int unsigned NOT NULL DEFAULT 0 COMMENT '业务时间，时间戳',
+  `amount` decimal(16,2) NOT NULL DEFAULT 0.00 COMMENT '金额',
 
   `add_time` int unsigned NOT NULL DEFAULT 0 COMMENT '添加时间',
   `last_update_time` int unsigned NOT NULL DEFAULT 0 COMMENT '最后更新时间',
-  `deleted_at` timestamp NULL DEFAULT NULL COMMENT '删除时间',
   `created_at` timestamp NULL DEFAULT NULL COMMENT '创建时间',
   `updated_at` timestamp NULL DEFAULT NULL COMMENT '更新时间',
+  `deleted_at` timestamp NULL DEFAULT NULL COMMENT '删除时间',
   PRIMARY KEY (`id`),
   UNIQUE KEY `{short_table}_no` (`{short_table}_no`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='{模块} - {表含义}';
 ```
+
+说明：DDL 草案使用 MySQL 类型表达结构意图；后续生成 Laravel migration 时，主键、`created_at` / `updated_at` / `deleted_at` 的具体写法要参考同模块历史，可能落成 `$table->id()`、`$table->increments('id')`、`$table->timestamps()`、`$table->softDeletes()` 或显式字段。
 
 ## 改表模板
 
@@ -55,22 +60,25 @@ ALTER TABLE `{table_name}`
 
 - 业务编号、单号、编码：`varchar(64) NOT NULL DEFAULT ''`
 - 名称、标题：`varchar(128)` 或 `varchar(255)`，根据展示长度决定。
-- 描述、备注：`varchar(512)`；长文本才用 `text`。
-- 状态、类型、开关：`tinyint unsigned NOT NULL DEFAULT 0`
+- 描述、备注：`varchar(512)` 或 `varchar(1024)`；长文本才用 `text`。
+- 状态、类型：如果是代码中的字符串枚举别名，优先 `varchar(32) NOT NULL DEFAULT ''`；如果是纯 0/1 或数值枚举，再用 `tinyint unsigned NOT NULL DEFAULT 0`。
+- 开关：`tinyint unsigned NOT NULL DEFAULT 0`
 - 数量、次数：`int unsigned NOT NULL DEFAULT 0`
-- 金额：优先 `decimal(10,2) NOT NULL DEFAULT 0.00`；严肃财务场景确认是否用分单位 `int`。
+- 金额：优先 `decimal(16,2) NOT NULL DEFAULT 0.00`；库存成本、均价、分摊等高精度场景确认是否用 `decimal(16,4)` 或更高；严肃财务场景确认是否用分单位 `int`。
 - 比率：`decimal(8,4) NOT NULL DEFAULT 0.0000`
-- 时间戳：项目业务字段优先 `int unsigned NOT NULL DEFAULT 0`，Laravel 时间字段使用 `timestamp NULL DEFAULT NULL`。
-- JSON 配置：MySQL 版本明确支持时用 `json NULL COMMENT 'xx配置'`；否则用 `text`。
+- 时间戳/业务日期/月：项目业务字段优先 `int unsigned NOT NULL DEFAULT 0`，注释写明时间戳、`Ymd` 或 `Ym`；Laravel 时间字段使用 `timestamp NULL DEFAULT NULL`。
+- JSON 配置：MySQL 版本明确支持时用 `json NULL COMMENT 'xx配置'` 或 `json DEFAULT NULL COMMENT 'xx配置'`；否则用 `text`，不要给空字符串默认值。
+- 操作人：优先使用 `add_adm_no/add_adm_name/edit_adm_no/edit_adm_name`。
 
 ## 索引规则
 
 - 只有明确查询、排序、唯一性或关联场景时加索引。
-- 单字段普通索引命名：`idx_{column}`。
+- 单字段普通索引命名：可用 `idx_{column}`；本仓库高频字段也常直接用 `{column}`，草案中保持稳定清晰即可。
 - 联合普通索引命名：`idx_{col1}_{col2}`，顺序按查询等值条件、范围条件、排序条件排列。
 - 唯一索引命名：单字段可用业务字段名或 `uk_{column}`；联合唯一用 `uk_{col1}_{col2}`。
 - 低区分度字段如状态、开关，不单独加索引；可放入联合索引前缀或后缀，视查询场景确认。
 - 大表加索引必须标风险，提醒考虑低峰执行、在线 DDL 或分阶段方案。
+- 加唯一索引前必须确认历史数据无重复；没有业务唯一性依据时不要主动加唯一索引。
 
 ## 兼容性规则
 

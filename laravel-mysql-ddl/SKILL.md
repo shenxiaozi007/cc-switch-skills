@@ -10,11 +10,13 @@ description: 当用户要求在创建 Laravel migration 前，根据业务需求
 
 ## 默认流程
 1. 先判断变更类型：新建表、已有表加字段、修改字段、加索引、删字段、拆表、数据回填。
-2. 从需求中提取表名、字段、类型、默认值、是否可空、注释、唯一性、索引、查询场景、数据量和兼容性要求。
-3. 信息不足时先给“保守草案 + 待确认项”；涉及高风险操作时必须明确要求用户确认。
-4. 按本仓库迁移规范生成 MySQL DDL；新表优先包含 `id`、业务编号、`add_time`、`last_update_time`、`deleted_at`、`created_at`、`updated_at`。
-5. 输出 DDL 后停下，等待用户确认。
-6. 用户确认 SQL 后，再建议使用 `laravel-migrations` 按该 SQL 生成 migration 文件。
+2. 先按当前仓库实际结构定位目标 `database/migrations/`：优先用用户给出的路径，否则从当前工作目录查找；如果存在多个服务目录，不要默认指定某个服务，要先确认或根据上下文选择。
+3. 查看目标 migration 目录下同模块、同表、同前缀表的历史 migration，提取局部字段风格、主键类型、时间字段和索引命名习惯。
+4. 从需求中提取表名、字段、类型、默认值、是否可空、注释、唯一性、索引、查询场景、数据量和兼容性要求。
+5. 信息不足时先给“保守草案 + 待确认项”；涉及高风险操作时必须明确要求用户确认。
+6. 按本仓库迁移规范生成 MySQL DDL；新表优先包含 `id`、业务编号、`add_time`、`last_update_time`、`deleted_at`、`created_at`、`updated_at`，但时间字段类型要说明将由后续 migration 跟随同模块历史落地。
+7. 输出 DDL 后停下，等待用户确认。
+8. 用户确认 SQL 后，再建议使用 `laravel-migrations` 按该 SQL 生成 migration 文件。
 
 ## 重要边界
 - 不直接执行 SQL。
@@ -29,11 +31,25 @@ description: 当用户要求在创建 Laravel migration 前，根据业务需求
 核心约定：
 - 表名和字段名使用小写蛇形命名。
 - 新表默认 `ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`。
-- 新表主键默认 `BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY`。
+- 新表主键默认 `BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY`；但生成 migration 时要根据同模块历史选择 `$table->id()`、`increments('id')` 或 `bigIncrements('id')`。
 - 业务编号字段紧跟主键：`{short_table}_no varchar(64) NOT NULL DEFAULT '' COMMENT 'xx编号'`，通常加唯一索引。
 - 时间字段按现有项目习惯保留 `add_time int unsigned NOT NULL DEFAULT 0`、`last_update_time int unsigned NOT NULL DEFAULT 0`。
-- 同时保留 Laravel 时间字段：`deleted_at timestamp NULL DEFAULT NULL`、`created_at timestamp NULL DEFAULT NULL`、`updated_at timestamp NULL DEFAULT NULL`。
+- 同时保留 Laravel 时间字段：`created_at timestamp NULL DEFAULT NULL`、`updated_at timestamp NULL DEFAULT NULL`、`deleted_at timestamp NULL DEFAULT NULL`；历史 migration 里存在 `deleted_at varchar(45)` 或 `$table->softDeletes()` 等写法，DDL 草案先表达结构意图，后续 migration 按同模块历史选择具体 Laravel 写法。
 - 字段必须写 `COMMENT`，索引名必须稳定清晰。
+- 状态/类型字段优先根据现有代码含义选择：
+  - 只有 0/1、数值枚举、数量级很小且不需要展示别名时，用 `tinyint unsigned NOT NULL DEFAULT 0`
+  - 项目历史大量使用字符串枚举别名时，用 `varchar(32) NOT NULL DEFAULT ''`
+- 编号、单号、外部关联 no 默认 `varchar(64) NOT NULL DEFAULT ''`；名称默认 `varchar(64/128)`；备注默认 `varchar(512/1024)`，长正文才用 `text`。
+- 业务时间字段默认 `int unsigned NOT NULL DEFAULT 0`，注释中写清 `时间戳`、`Ymd` 或 `Ym`。
+- 金额/单价/成本默认先按 `decimal(16,2)` 草拟；库存、均价、分摊等高精度场景确认是否用 `decimal(16,4)` 或更高。
+- JSON 字段使用 `json DEFAULT NULL COMMENT '...'` 或 `json NULL COMMENT '...'`，不要给空字符串默认值。
+- 操作人字段按仓库习惯优先使用 `add_adm_no/add_adm_name/edit_adm_no/edit_adm_name`。
+
+## 仓库真实习惯摘要
+- migration 目录既有根目录平铺，也有大量 `YYYYMMDD_topic` 专题目录；SQL 草案只管 DDL，但输出下一步时要提醒后续 migration 放到同模块最近专题目录。
+- 新表常见表注释为 `COMMENT='模块 - 表含义'`，后续 migration 可能落成 `$table->comment(...)`；旧表也有 `set_table_comment()`。
+- 单字段索引历史常用字段名作为索引名，例如 `KEY clinic_no (clinic_no)`；新草案可用 `idx_` 前缀，但如果是本仓库高频 no 字段，优先用稳定短名并在索引说明中解释。
+- 历史改表 migration 存在空 `down()` 和拼写错误文件名，生成草案时要明确回滚 SQL 或说明无法安全回滚的原因，不延续这些问题。
 
 ## 输出格式
 每次输出按这个顺序：
@@ -48,6 +64,8 @@ description: 当用户要求在创建 Laravel migration 前，根据业务需求
 ## 需要先确认的情况
 - 表名、模块名、业务编号命名无法推断。
 - 字段类型会影响金额、精度、时间、枚举或状态流转。
+- 主键是否必须保持同模块 `int unsigned` 还是可用 `bigint unsigned`。
+- Laravel 时间字段要按 `timestamp NULL` 表达，还是兼容历史 `deleted_at varchar(45)`。
 - 是否唯一、是否允许为空、默认值、数据量级、是否大表不明确。
 - 变更会影响已有线上数据或需要数据回填。
 - 需求可能拆成多张表，但用户只要求“一张表”。
