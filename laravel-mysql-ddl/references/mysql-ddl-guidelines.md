@@ -9,7 +9,7 @@ CREATE TABLE `{table_name}` (
 
   -- 业务字段
   `status` varchar(32) NOT NULL DEFAULT '' COMMENT '状态',
-  `business_at` int unsigned NOT NULL DEFAULT 0 COMMENT '业务时间，时间戳',
+  `business_at` int unsigned NOT NULL DEFAULT 0 COMMENT '业务时间，Unix timestamp',
   `amount` decimal(16,2) NOT NULL DEFAULT 0.00 COMMENT '金额',
 
   `add_time` int unsigned NOT NULL DEFAULT 0 COMMENT '添加时间',
@@ -60,13 +60,18 @@ ALTER TABLE `{table_name}`
 
 - 业务编号、单号、编码：`varchar(64) NOT NULL DEFAULT ''`
 - 名称、标题：`varchar(128)` 或 `varchar(255)`，根据展示长度决定。
-- 描述、备注：`varchar(512)` 或 `varchar(1024)`；长文本才用 `text`。
+- 描述、备注：默认 `varchar(256)` 或 `varchar(512)`；长说明、富文本或明显大段内容才确认使用 `varchar(1024)` 或 `text`。
 - 状态、类型：如果是代码中的字符串枚举别名，优先 `varchar(32) NOT NULL DEFAULT ''`；如果是纯 0/1 或数值枚举，再用 `tinyint unsigned NOT NULL DEFAULT 0`。
 - 开关：`tinyint unsigned NOT NULL DEFAULT 0`
 - 数量、次数：`int unsigned NOT NULL DEFAULT 0`
 - 金额：优先 `decimal(16,2) NOT NULL DEFAULT 0.00`；库存成本、均价、分摊等高精度场景确认是否用 `decimal(16,4)` 或更高；严肃财务场景确认是否用分单位 `int`。
 - 比率：`decimal(8,4) NOT NULL DEFAULT 0.0000`
-- 时间戳/业务日期/月：项目业务字段优先 `int unsigned NOT NULL DEFAULT 0`，注释写明时间戳、`Ymd` 或 `Ym`；Laravel 时间字段使用 `timestamp NULL DEFAULT NULL`。
+- 业务时间：
+  - 精确到时分秒用 `_at` 后缀，`int unsigned NOT NULL DEFAULT 0`，存 Unix timestamp。
+  - 只按天统计、筛选、展示用 `_date` 后缀，`int unsigned NOT NULL DEFAULT 0`，存 `Ymd`。
+  - 月维度用 `_month` 后缀，`int unsigned NOT NULL DEFAULT 0`，存 `Ym`，例如 `record_pay_month`。
+  - 不要为普通业务时间新造 `_time` 字段；记录创建/更新时间固定用 `add_time` / `last_update_time`。
+  - Laravel 框架维护字段使用 `timestamp NULL DEFAULT NULL`，保留 `created_at` / `updated_at` / `deleted_at`。
 - JSON 配置：MySQL 版本明确支持时用 `json NULL COMMENT 'xx配置'` 或 `json DEFAULT NULL COMMENT 'xx配置'`；否则用 `text`，不要给空字符串默认值。
 - 操作人：优先使用 `add_adm_no/add_adm_name/edit_adm_no/edit_adm_name`。
 
@@ -77,6 +82,8 @@ ALTER TABLE `{table_name}`
 - 联合普通索引命名：`idx_{col1}_{col2}`，顺序按查询等值条件、范围条件、排序条件排列。
 - 唯一索引命名：单字段可用业务字段名或 `uk_{column}`；联合唯一用 `uk_{col1}_{col2}`。
 - 低区分度字段如状态、开关，不单独加索引；可放入联合索引前缀或后缀，视查询场景确认。
+- 枚举字段默认不加单字段索引，只有明确列表筛选、高频统计或联合查询场景才加。
+- 文件 ID 字段默认不加索引，只有明确按文件反查业务记录或关联查询时才加。
 - 大表加索引必须标风险，提醒考虑低峰执行、在线 DDL 或分阶段方案。
 - 加唯一索引前必须确认历史数据无重复；没有业务唯一性依据时不要主动加唯一索引。
 
@@ -96,8 +103,8 @@ CREATE TABLE `market_activity` (
   `activity_no` varchar(64) NOT NULL DEFAULT '' COMMENT '活动编号',
   `activity_name` varchar(128) NOT NULL DEFAULT '' COMMENT '活动名称',
   `status` tinyint unsigned NOT NULL DEFAULT 0 COMMENT '状态：0未启用 1启用',
-  `start_time` int unsigned NOT NULL DEFAULT 0 COMMENT '开始时间',
-  `end_time` int unsigned NOT NULL DEFAULT 0 COMMENT '结束时间',
+  `start_at` int unsigned NOT NULL DEFAULT 0 COMMENT '开始时间，Unix timestamp',
+  `end_at` int unsigned NOT NULL DEFAULT 0 COMMENT '结束时间，Unix timestamp',
   `remark` varchar(512) NOT NULL DEFAULT '' COMMENT '备注',
   `add_time` int unsigned NOT NULL DEFAULT 0 COMMENT '添加时间',
   `last_update_time` int unsigned NOT NULL DEFAULT 0 COMMENT '最后更新时间',
@@ -106,6 +113,6 @@ CREATE TABLE `market_activity` (
   `updated_at` timestamp NULL DEFAULT NULL COMMENT '更新时间',
   PRIMARY KEY (`id`),
   UNIQUE KEY `activity_no` (`activity_no`),
-  KEY `idx_status_start_time` (`status`, `start_time`)
+  KEY `idx_status_start_at` (`status`, `start_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='营销 - 活动';
 ```

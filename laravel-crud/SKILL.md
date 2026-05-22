@@ -20,12 +20,14 @@ description: 当用户要求“新增接口”“改增删改查”“做列表�
 3. 如果涉及列表接口（分页或不分页），开始编码前先列出可筛选字段候选，让用户选择哪些字段需要做筛选；只为用户确认的字段补 Model scope/Dao 查询能力。
 4. 明确接口输入输出、权限点、中间件、是否写操作、是否涉及表结构。
 5. 按薄 Controller、Business 校验与编排、Dao 查询持久化的分层落地。
-6. 涉及写接口时评估 `api_mutex`，但按现有模块和风险决定是否使用。
-7. 完成后做最小验证，并在交付中说明验证结果。
+6. 如果项目存在 `config/rbac/**` 权限配置，并且本次 route 使用了 `WebRoute::*` 权限点，同步补对应权限组和权限项配置。
+7. 涉及写接口时评估 `api_mutex`，但按现有模块和风险决定是否使用。
+8. 完成后做最小验证，并在交付中说明验证结果。
 
 ## 开工前必须询问
 - 新增或调整 CRUD route 前，必须先把 route 以 `METHOD path -> Controller@method -> 默认权限建议` 的格式列出来，询问用户哪些 route 需要使用 `WebRoute::*` 权限点。
 - 用户确认需要权限的 route 后，再补充或复用对应 `WebRoute` 常量；用户未选择、明确不需要权限或未回答但允许继续时，使用 `WebRoute::AUTH_NEEDLESS`。
+- 如果同模块已有 `config/rbac/management/module/**` 或类似权限配置，route 权限确认时一并说明将新增/复用哪个 `permission_group`、`group_alias`、`alias_name`。
 - 涉及写接口时，在 route 清单里标注是否建议加 `api_mutex`，并等待用户确认是否使用。
 - 涉及列表接口时，必须先列出筛选字段候选，优先从表字段、已有同类列表、常见查询口径中推断，例如：编号、名称、状态、类型、负责人、时间范围、父级/归属关系等。
 - 用户选择筛选字段后，才在 Model 增加对应 `scopeXxxQuery`/`scopeXxxLikeQuery`，避免无用筛选条件；未被选择的字段不主动实现筛选。
@@ -42,6 +44,7 @@ description: 当用户要求“新增接口”“改增删改查”“做列表�
 - 不在 Controller 写复杂业务分支。
 - 不绕过 Business 直接在 Controller 调 Dao 或 Model。
 - 不为了新接口重构无关旧接口。
+- 新增接口字段必须以 migration/Model 实际字段为准，页面原型中存在但表结构不存在的字段不要主动写入。
 - Raw SQL 必须参数绑定，避免字符串拼接。
 - 不保留已经确认废弃的兼容 route、权限常量、RBAC 项、空 Business 方法、旧枚举或旧字段；用户明确要求保留的兼容入口除外。
 - 不在新增 Model 中重复引入 BaseModel 已包含的 trait，例如 `SoftDeletes`、`ModelTimeTraits`、`ModelMainNoTrait`。
@@ -49,6 +52,7 @@ description: 当用户要求“新增接口”“改增删改查”“做列表�
 
 ## 完成检查
 - 路由、中间件、权限点与同模块风格一致。
+- 存在 `config/rbac/**` 权限配置时，已同步补权限组和权限项，并确认 `client_route_name`、`proxy_route_name` 指向对应 `WebRoute`。
 - Controller 仅收参、调用 Business、`revert()` 返回。
 - Business 完成校验、流程编排、事务边界。
 - Dao 封装查询和持久化；涉及结构变更时已补 migration 或说明。
@@ -60,14 +64,20 @@ description: 当用户要求“新增接口”“改增删改查”“做列表�
 - 推荐构造器注入：`__construct(protected Request $request, protected XxxBusiness $business)`。
 - 不在 Controller 写复杂业务分支。
 - Controller 传入 Business 的数组参数必须用 `$this->request->only([...])` 白名单；单字段接口可用 `$this->validate()` 后只传字段值。
+- 新增接口方法优先命名为 `store`，编辑/保存修改接口优先命名为 `update`；route path、Controller、Business、`WebRoute` 常量命名保持一致。
 - 管理端写操作通常透传 `management_auth_info()`。
 - 管理端路由通常配 `auth:jwt-management` + `WebRoute::*` 权限点，保持与 `routes/management/proxy/**` 同模块文件一致。
-- 写接口是否加 `api_mutex` 优先参考同模块已有写接口；新增高风险写操作要在 route 清单里标注建议。
+- 权限控制通常依赖 route 的 `as => WebRoute::*` 和 `config/rbac/**` 初始化配置；不要误把“补权限配置”等同于新增路由中间件，除非同模块明确这么做。
+- 写接口是否加 `api_mutex` 优先参考同模块已有写接口；如果项目或同模块之前没有使用，不要默认新增，除非用户确认。
 
 ## Business 约束
 - 承担参数校验、业务编排、事务控制。
 - 常用 `validator(...)->validate()` 做规则校验。
 - 枚举型参数优先使用 `Rule::in(XXX::all())`。
+- 普通关联编号默认只做必填/格式校验，例如 `xxx_no => required|string`；不要主动查库校验存在性，除非需求明确指定。确需存在性校验时放在 `validator` 中，用 `Rule::exists($this->xxxDao->getTableName(), 'xxx_no')`，表名从 Dao 的 `getTableName()` 获取，不要写死；软删表追加 `whereNull('deleted_at')`。
+- 列表/详情的查询字段和关联一般在方法内单独赋值为 `$columns`、`$relations` 后传入 Dao；不要仅为了复用少量字段/关联而抽 `getColumns()`、`getRelations()` 这类方法，除非字段很多、逻辑复杂或同模块已有这种固定写法。
+- 列表/详情返回枚举字段时，必须同步提供对应 `*_str` 文案字段；优先在 Model 用读取原字段时 `$this->append('xxx_str')` 的 accessor 写法，并在 `getXxxStrAttribute()` 中调用对应常量类 `getName()`。
+- 列表/详情返回文件 ID 字段时，必须同步提供对应 `*_str` 文件访问地址字段；优先在 Model 用读取原字段时无条件 `$this->append('xxx_str')`，并在 `getXxxStrAttribute()` 中用 `file_url($this->xxx)` 处理，空值返回空字符串。
 - 复杂入参场景建议补 `customAttributes` 优化报错提示。
 - 跨表写入必须明确事务边界（`DB::transaction` 或 `app('db')->transaction`）。
 - 事务范围要尽量小：参数校验、读库查询、存在性校验、日期/状态前置校验、待写入数组组装，默认放事务外；事务内只放必须一起提交/回滚的写操作、日志、快照、同步更新。

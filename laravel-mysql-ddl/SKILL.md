@@ -22,7 +22,7 @@ description: 当用户要求在创建 Laravel migration 前，根据业务需求
 - 不直接执行 SQL。
 - 不直接创建 migration 文件，除非用户明确要求切到 `laravel-migrations`。
 - 不把需求里的业务描述直接变成大段宽表；先识别核心实体和关系。
-- 不为没有查询场景的字段主动加索引。
+- 不为没有查询场景的字段主动加索引；枚举字段、文件 ID 字段也不要因为“可能会用”就加索引。
 - 删除字段、改字段类型、大表加索引、非空无默认值、唯一约束、数据回填都要标为高风险。
 
 ## DDL 规则
@@ -39,8 +39,12 @@ description: 当用户要求在创建 Laravel migration 前，根据业务需求
 - 状态/类型字段优先根据现有代码含义选择：
   - 只有 0/1、数值枚举、数量级很小且不需要展示别名时，用 `tinyint unsigned NOT NULL DEFAULT 0`
   - 项目历史大量使用字符串枚举别名时，用 `varchar(32) NOT NULL DEFAULT ''`
-- 编号、单号、外部关联 no 默认 `varchar(64) NOT NULL DEFAULT ''`；名称默认 `varchar(64/128)`；备注默认 `varchar(512/1024)`，长正文才用 `text`。
-- 业务时间字段默认 `int unsigned NOT NULL DEFAULT 0`，注释中写清 `时间戳`、`Ymd` 或 `Ym`。
+- 编号、单号、外部关联 no 默认 `varchar(64) NOT NULL DEFAULT ''`；文件 ID 默认 `varchar(32) NOT NULL DEFAULT ''`；名称默认 `varchar(64/128)`；备注默认 `varchar(256/512)`，长正文才用 `text`。
+- 业务时间命名按精度表达：
+  - 精确到时分秒的业务时间使用 `_at` 后缀，存 Unix timestamp，例如 `sale_start_at`。
+  - 只按天统计、筛选或展示日期使用 `_date` 后缀，存 `Ymd`，例如 `effective_date`。
+  - 月维度使用 `_month` 后缀，存 `Ym`，例如 `record_pay_month`。
+  - 记录创建/更新时间只使用 `add_time` / `last_update_time`，不要再新造普通 `_time` 字段。
 - 金额/单价/成本默认先按 `decimal(16,2)` 草拟；库存、均价、分摊等高精度场景确认是否用 `decimal(16,4)` 或更高。
 - JSON 字段使用 `json DEFAULT NULL COMMENT '...'` 或 `json NULL COMMENT '...'`，不要给空字符串默认值。
 - 操作人字段按仓库习惯优先使用 `add_adm_no/add_adm_name/edit_adm_no/edit_adm_name`。
@@ -67,6 +71,8 @@ description: 当用户要求在创建 Laravel migration 前，根据业务需求
 - 主键是否必须保持同模块 `int unsigned` 还是可用 `bigint unsigned`。
 - Laravel 时间字段要按 `timestamp NULL` 表达，还是兼容历史 `deleted_at varchar(45)`。
 - 是否唯一、是否允许为空、默认值、数据量级、是否大表不明确。
+- 业务时间字段应该是 `_at`、`_date` 还是 `_month` 不明确。
+- 枚举字段、文件 ID 字段是否真的存在筛选、关联或排序场景不明确。
 - 变更会影响已有线上数据或需要数据回填。
 - 需求可能拆成多张表，但用户只要求“一张表”。
 

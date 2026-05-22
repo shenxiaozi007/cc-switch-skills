@@ -37,6 +37,7 @@ description: 当用户要求“新增 migration”“改表结构”“加字段
 - 不照抄历史 migration 里的明显错误：例如 `down()` 里 `dropIfExists()` 表名和 `up()` 创建表名不一致、空 `down()`、`alert`/`filed` 等历史拼写错误；新增文件要用正确命名。
 - 新表默认推荐 `$table->timestamps();` 和 `$table->softDeletes();`，但如果同模块/目标表族历史显式维护 `created_at` / `updated_at` / `deleted_at`，优先跟随局部一致性，并在结果里说明。
 - 单字段索引优先链式写在字段定义上；联合索引才后置声明。
+- 索引名称统一使用字段名命名，不带表名前缀：单字段唯一索引用 `字段名_unique`，单字段普通索引用 `字段名_index`；联合索引用 `字段1_字段2_unique` / `字段1_字段2_index`。
 - 改表 migration 的 `down()` 不允许留空；无法安全回滚时要写明原因并让用户确认，不要沉默生成不可回滚文件。
 
 ## 完成检查
@@ -84,13 +85,13 @@ description: 当用户要求“新增 migration”“改表结构”“加字段
    - JSON 字段使用 `json(...)->nullable()->comment(...)`，不要设置字符串默认值
    - 操作人字段常见 `add_adm_no/add_adm_name/edit_adm_no/edit_adm_name`
 5. 新建表时，单字段索引优先写在字段定义链路上，不要集中放到表定义末尾：
-   - 唯一索引：`$table->string('operation_log_no', 64)->default('')->comment('日志编号')->unique('operation_log_no');`
-   - 普通索引：`$table->string('ip', 128)->default('')->comment('登录ip')->index('ip');`
-   - 多字段联合索引或必须后置声明的索引，才使用 `$table->index([...], 'index_name')` / `$table->unique([...], 'index_name')`。
+   - 唯一索引：`$table->string('operation_log_no', 64)->default('')->comment('日志编号')->unique('operation_log_no_unique');`
+   - 普通索引：`$table->string('ip', 128)->default('')->comment('登录ip')->index('ip_index');`
+   - 多字段联合索引或必须后置声明的索引，才使用 `$table->index([...], '字段1_字段2_index')` / `$table->unique([...], '字段1_字段2_unique')`。
 6. 新建表优先使用基础模板，但要先对齐同模块历史：
    - 表注释优先写在 `Schema::create()` 内：`$table->comment('模块 - 表含义');`；历史也存在 `set_table_comment('table', '表含义')`，只有维护旧模块时才沿用。
    - 主键默认可使用 `$table->id();`；如果同模块普遍使用 `$table->increments('id')` 或 `$table->bigIncrements('id')`，跟随同模块。
-   - 业务编号字段紧跟主键：`$table->string('简化的表名_no', 64)->default('')->comment('xx编号')->unique('索引名');`
+   - 业务编号字段紧跟主键：`$table->string('简化的表名_no', 64)->default('')->comment('xx编号')->unique('简化的表名_no_unique');`
    - `add_time` / `last_update_time` 放在业务字段后：`$table->unsignedInteger('add_time')->default(0)->comment('添加时间');`、`$table->unsignedInteger('last_update_time')->default(0)->comment('最后更新时间');`
    - 新表推荐 `$table->timestamps();` 和 `$table->softDeletes();`；维护显式时间字段的历史表族时保持局部一致。
    - 需要完整模板时读取 `references/migration-skeleton.md`。
