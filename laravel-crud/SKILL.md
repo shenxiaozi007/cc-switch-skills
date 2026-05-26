@@ -54,14 +54,14 @@ description: 当用户要求“新增接口”“改增删改查”“做列表�
 - Controller 仅收参、调用 Business、`revert()` 返回。
 - Business 完成校验、流程编排、事务边界。
 - Dao 封装查询和持久化；涉及结构变更时已补 migration 或说明。
-- 提交前针对本次新增/修改模块扫描：`request->all(`、直接 `doQuery(`、`extends Model`、`function mainNo(`、重复 trait、废弃 route/权限/枚举、`refresh()`、空兼容方法、旧字段名。
+- 提交前针对本次新增/修改模块扫描：`request->all(`、直接 `doQuery(`、`extends Model`、`function mainNo(`、重复 trait、废弃 route/权限/枚举、`refresh()`、空兼容方法、旧字段名；其中 `request->all(` 不是一律禁止，必须确认对应 Business 入口使用 `$params = validator($params, [...])->validate()` 过滤字段。
 - 新增或修改文件至少跑 `php -l`；批量新增 Model/Dao/migration 时用 `find ... -name '*.php' -print0 | xargs -0 -n1 php -l`。
 
 ## Controller 约束
 - 仅收参、调用 Business、`revert()` 返回。
 - 推荐构造器注入：`__construct(protected Request $request, protected XxxBusiness $business)`。
 - 不在 Controller 写复杂业务分支。
-- Controller 传入 Business 的数组参数优先用 `$this->request->only([...])` 白名单；如果 Business 方法入口第一步已通过 `validator(...)->validate()` 定义并过滤允许字段，可按同模块习惯传 `$this->request->all()`；单字段接口可用 `$this->validate()` 后只传字段值。
+- Controller 传入 Business 的数组参数：如果 Business 方法入口第一步会用 `$params = validator($params, [...])->validate()` 定义并过滤允许字段，优先直接传 `$this->request->all()`，由 Business validator 控制最终字段；如果 Business 不做入口过滤，Controller 必须用 `$this->request->only([...])` 白名单。单字段接口可用 `$this->validate()` 后只传字段值，但若 Business 已统一校验数组入参，也应保持 `all()` + Business validator 的模式。
 - 新增接口方法优先命名为 `store`，编辑/保存修改接口优先命名为 `update`；route path、Controller、Business、`WebRoute` 常量命名保持一致。
 - 管理端写操作通常透传 `management_auth_info()`。
 - 管理端路由通常配 `auth:jwt-management` + `WebRoute::*` 权限点，保持与 `routes/management/proxy/**` 同模块文件一致。
@@ -69,10 +69,10 @@ description: 当用户要求“新增接口”“改增删改查”“做列表�
 
 ## Business 约束
 - 承担参数校验、业务编排、事务控制。
-- 常用 `validator(...)->validate()` 做规则校验。
+- 常用 `validator(...)->validate()` 做规则校验；当 Controller 传入 `$this->request->all()` 时，Business 必须写成 `$params = validator($params, [...])->validate()`，并只把过滤后的 `$params` 继续传给 Dao/后续逻辑，不能忽略 validate 返回值。
 - 枚举型参数优先使用 `Rule::in(XXX::all())`。
 - 普通关联编号默认只做必填/格式校验，例如 `xxx_no => required|string`；不要主动查库校验存在性，除非需求明确指定。确需存在性校验时放在 `validator` 中，用 `Rule::exists($this->xxxDao->getTableName(), 'xxx_no')`，表名从 Dao 的 `getTableName()` 获取，不要写死；软删表追加 `whereNull('deleted_at')`。
-- 列表/详情的查询字段和关联一般在方法内单独赋值为 `$columns`、`$relations` 后传入 Dao；不要仅为了复用少量字段/关联而抽 `getColumns()`、`getRelations()` 这类方法，除非字段很多、逻辑复杂或同模块已有这种固定写法。
+- 列表/详情/子资源接口的查询字段和关联在方法内先单独赋值为 `$columns`、`$relations` 后再传入 Dao，即使字段较少也不要把 columns/relations 数组直接内联在 Dao 调用中；不要仅为了复用少量字段/关联而抽 `getColumns()`、`getRelations()` 这类方法，除非字段很多、逻辑复杂或同模块已有这种固定写法。
 - 列表/详情返回枚举字段时，必须同步提供对应 `*_str` 文案字段；优先在 Model 用读取原字段时 `$this->append('xxx_str')` 的 accessor 写法，并在 `getXxxStrAttribute()` 中调用对应常量类 `getName()`。
 - 列表/详情返回展示文案字段时，字段归属哪个 Model 就在哪个 Model 里追加：主表字段由主表 Model 的 accessor append，关联表字段由关联 Model 的 accessor append。不要在 Business 里写 `appendXxxListFields()`、`each(fn...)` 之类方法专门补展示字段。
 - Business 不负责把关联表展示字段扁平化到主表行上，除非接口契约明确要求；默认保留关联结构，例如关系表的 `start_date` 由关系 Model 返回 `start_date_str`。
@@ -91,6 +91,7 @@ description: 当用户要求“新增接口”“改增删改查”“做列表�
 - 复用项目基础 Dao 能力（如 `getList/getPageList/findBy...`）。
 - 查询条件优先复用 Model 的 `scopeXxxQuery`、`scopeXxxLikeQuery`、时间范围 scope；只为需求确认的筛选字段补 scope。
 - 常规列表优先让 Business 组 `$params` 后调用 `getList/getPageList`；不要为简单列表额外写自定义 Dao 方法。
+- 子资源/Tab 资料接口如果只是按父级业务编号（如 `product_no`）读取子表数据，应直接调用子资源 Dao 按该外键查询；不要为了取子资源而先查父 Model 再通过关系读取，除非需要校验父实体状态或依赖父表字段。
 - Dao 中确定参数的查询方法不要走通用 `$params + doQuery()`，应使用 `newBuilder()->select($this->getSelectColumns($columns))->with($relations)->XxxQuery(...)->first/get()`。
 - 确定参数的方法签名要直接表达参数含义，例如 `array $employeeNos, string $realNameLike = '', array $columns = []`，不要用泛化 `$params` 兜底。
 - `beforeBuildFiled(Builder $query, array $params): array` 用于整理组合筛选参数，例如把 `team_member_name` 转成 `team_bind_user_params`，把员工姓名/工号/是否在职转成 `employee_params`。
