@@ -1,0 +1,4 @@
+interface:
+  display_name: "守护者max 运维"
+  short_description: "守护者max 项目介绍、本地验证、生产上线和排障流程。"
+  default_prompt: "使用守护者max运维 skill，说明这个项目的架构、部署步骤、上线检查或生产排障流程。"

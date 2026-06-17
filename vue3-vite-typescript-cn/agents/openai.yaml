@@ -1,0 +1,5 @@
+interface:
+  display_name: Vue3 Vite TypeScript CN
+  short_description: 中文 Vue3 + Vite + TypeScript 前端开发规范。
+  icon: code
+  color: '#42b883'
