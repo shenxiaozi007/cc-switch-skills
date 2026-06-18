@@ -47,6 +47,7 @@ description: 当用户要求“新增接口”“改增删改查”“做列表�
 - 新增接口字段必须以 migration/Model 实际字段为准，页面原型中存在但表结构不存在的字段不要主动写入。
 - Raw SQL 必须参数绑定，避免字符串拼接。
 - 涉及日期、月份、时间范围、自然月起止、时间戳格式化等时间处理时，优先使用 `Carbon`，不要默认使用 `DateTime` / `DateTimeImmutable` 混搭，除非现有模块已有明确固定写法且本次只做局部维护。
+- 从 `Ymd`、时间戳等日期值推导月份、日期或时间段时，使用 `Carbon::createFromFormat()`、`date()` 等时间函数，不用 `substr((string)$date, 0, 6)` 这类字符串切割。
 - 不保留已经确认废弃的兼容 route、权限常量、RBAC 项、空 Business 方法、旧枚举或旧字段；用户明确要求保留的兼容入口除外。
 - 不在新增 Model 中重复引入 BaseModel 已包含的 trait，例如 `SoftDeletes`、`ModelTimeTraits`、`ModelMainNoTrait`。
 - 不用 `$model->refresh()` 解决普通更新后的取值问题；Eloquent `update()` 后当前实例已同步变更字段，只有确实需要重新加载关系或数据库触发结果时才刷新。
@@ -87,6 +88,7 @@ description: 当用户要求“新增接口”“改增删改查”“做列表�
 - 枚举型参数优先使用 `Rule::in(XXX::all())`。
 - 普通关联编号默认只做必填/格式校验，例如 `xxx_no => required|string`；不要主动查库校验存在性，除非需求明确指定。确需存在性校验时放在 `validator` 中，用 `Rule::exists($this->xxxDao->getTableName(), 'xxx_no')`，表名从 Dao 的 `getTableName()` 获取，不要写死；软删表追加 `whereNull('deleted_at')`。
 - 列表/详情/子资源接口的查询字段和关联在方法内先单独赋值为 `$columns`、`$relations` 后再传入 Dao，即使字段较少也不要把 columns/relations 数组直接内联在 Dao 调用中；不要仅为了复用少量字段/关联而抽 `getColumns()`、`getRelations()` 这类方法，除非字段很多、逻辑复杂或同模块已有这种固定写法。
+- 从 Dao 返回的 Collection 中提取编号数组时，在 Business 中使用 `$rows->pluck('xxx_no')->filter()->unique()->toArray()`；不要默认追加 `values()->all()`。
 - 列表/详情返回枚举字段时，必须同步提供对应 `*_str` 文案字段；优先在 Model 用读取原字段时 `$this->append('xxx_str')` 的 accessor 写法，并在 `getXxxStrAttribute()` 中调用对应常量类 `getName()`。
 - 列表/详情返回展示文案字段时，字段归属哪个 Model 就在哪个 Model 里追加：主表字段由主表 Model 的 accessor append，关联表字段由关联 Model 的 accessor append。不要在 Business 里写 `appendXxxListFields()`、`each(fn...)` 之类方法专门补展示字段。
 - Business 不负责把关联表展示字段扁平化到主表行上，除非接口契约明确要求；默认保留关联结构，例如关系表的 `start_date` 由关系 Model 返回 `start_date_str`。
@@ -110,11 +112,13 @@ description: 当用户要求“新增接口”“改增删改查”“做列表�
 - 常规列表优先让 Business 组 `$params` 后调用 `getList/getPageList`；不要为简单列表额外写自定义 Dao 方法。
 - 子资源/Tab 资料接口如果只是按父级业务编号（如 `product_no`）读取子表数据，应直接调用子资源 Dao 按该外键查询；不要为了取子资源而先查父 Model 再通过关系读取，除非需要校验父实体状态或依赖父表字段。
 - Dao 中确定参数的查询方法不要走通用 `$params + doQuery()`，应使用 `newBuilder()->select($this->getSelectColumns($columns))->with($relations)->XxxQuery(...)->first/get()`。
-- 确定参数的方法签名要直接表达参数含义，例如 `array $employeeNos, string $realNameLike = '', array $columns = []`，不要用泛化 `$params` 兜底。
+- 确定参数的方法签名要直接表达参数含义，例如 `array $employeeNos, string $realNameLike = '', array $columns = []`，不要用泛化 `$params` 兜底；查询字段必须通过 `array $columns = []` 参数从 Business 传入，不在 Dao 方法内部写死 `['xxx_no', ...]`。
+- Dao 查询方法一般返回 Model 或 Collection，不为了方便在 Dao 里 `pluck()` 编号数组；编号提取、`filter()`、`unique()`、`toArray()` 放在 Business 编排层处理。
 - 每个 Dao 默认只负责自身模型/主表的查询和统计；需要查询不同职责表时，拆到各自 Dao，再由 Business 汇总。比如关系 Dao 只取关系表编号，员工展示信息由 EmployeeDao 查，客户数量由 CustomerDao 统计，订单/保单金额由对应 Dao 统计。
 - Dao 查询优先使用模型 `newBuilder()` 和 Model scope，不优先使用 `DB::table()`；除非处理无模型临时表、复杂 union、数据库特定能力或现有模块已有明确例外。使用模型 builder 时避免随意 `from('table as alias')`，以免和 SoftDeletes 全局作用域产生表别名问题。
 - 统计类 Dao 方法可使用 `$columns = [...]` + `selectRaw(implode(',', $columns))` + `groupBy(...)` 表达聚合字段，但筛选条件仍优先通过 Model scope 表达；聚合 Raw 字段应为固定 SQL 片段，不拼接用户输入。
 - 跨表 join 只在该 Dao 的主模型查询确实需要关联表字段进行统计时使用；关联表筛选条件优先封装为主模型 scope（如 `CustomerAddTimeGteQuery`、`CustomerNotDeletedQuery`），避免 Dao 方法里散落 `where/whereNull/whereBetween`。
+- 如果业务明确要求不用 join 或跨不同职责表取值，按“Dao 分别查询自身表，Business 汇总编号再查下一张表”的两步/多步方式实现。
 - `beforeBuildFiled(Builder $query, array $params): array` 用于整理组合筛选参数，例如把 `team_member_name` 转成 `team_bind_user_params`，把员工姓名/工号/是否在职转成 `employee_params`。
 - 禁止 SQL 字符串拼接；Raw 语句必须参数绑定。
 
