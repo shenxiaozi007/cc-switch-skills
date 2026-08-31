@@ -57,6 +57,7 @@ description: 当用户要求“新增接口”“改增删改查”“做列表�
 - 业务枚举分组或固定别名数组必须收敛到对应 Constant 类方法中，不在 Dao/Business 中保留私有数组常量；例如储蓄类险种别名应在 `InsuranceClassAlias` 增加 `depositAliases()`，并通过 `InsuranceClassAlias::depositAliases()` 使用。
 - 不在新增 Model 中重复引入 BaseModel 已包含的 trait，例如 `SoftDeletes`、`ModelTimeTraits`、`ModelMainNoTrait`。
 - 不用 `$model->refresh()` 解决普通更新后的取值问题；Eloquent `update()` 后当前实例已同步变更字段，只有确实需要重新加载关系或数据库触发结果时才刷新。
+- 在已有文件中新增方法时，默认追加到该文件对应类的末尾，尽量不插入或重排旧方法；仅在继承关系、调用顺序、可见性分组或框架约定明确要求时调整位置，以减少多人协作和后续合并冲突。
 
 ## 关联查询规范
 - 列表/详情需要返回关联表展示字段时，优先在 Business 定义 `$relations` 并传给 Dao，由 Dao 使用 `with($relations)` 预加载；关联字段必须只选择必要列，并包含关系匹配键，例如 `planner:employee_no,real_name`、`team:team_no,name`。
